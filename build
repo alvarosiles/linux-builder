@@ -1,0 +1,100 @@
+#!/usr/bin/env bash
+#
+# Convierte un script .sh en un ejecutable compilado que corre con doble
+# clic desde Nautilus (sin el aviso de "¿Ejecutar o Mostrar?").
+#
+# Uso: ./build /ruta/al/script.sh [nombre_salida]
+# Uso: ./build           -> muestra un menú con los .sh de esta carpeta
+
+set -euo pipefail
+
+YELLOW='\033[1;33m'
+RESET='\033[0m'
+
+# Menú interactivo: lista los .sh de la carpeta actual y deja elegir uno
+# con las flechas del teclado + Enter.
+elegir_sh() {
+    local -a files=()
+    while IFS= read -r -d '' f; do
+        files+=("$(basename "$f")")
+    done < <(find . -maxdepth 1 -name "*.sh" -print0 | sort -z)
+
+    if [[ ${#files[@]} -eq 0 ]]; then
+        echo -e "${YELLOW}No hay archivos .sh en esta carpeta${RESET}" >&2
+        exit 1
+    fi
+
+    local selected=0
+    local key rest
+
+    dibujar() {
+        for i in "${!files[@]}"; do
+            if [[ $i -eq $selected ]]; then
+                echo -e "${YELLOW}> ${files[$i]}${RESET}"
+            else
+                echo "  ${files[$i]}"
+            fi
+        done
+    }
+
+    echo -e "${YELLOW}Elegí el .sh a compilar (↑/↓ y Enter):${RESET}" >&2
+    tput civis >&2
+    dibujar >&2
+    while true; do
+        IFS= read -rsn1 key
+        if [[ $key == $'\x1b' ]]; then
+            read -rsn2 -t 0.01 rest || true
+            case "$rest" in
+                '[A') ((selected--)); [[ $selected -lt 0 ]] && selected=$((${#files[@]} - 1)) ;;
+                '[B') ((selected++)); [[ $selected -ge ${#files[@]} ]] && selected=0 ;;
+            esac
+        elif [[ -z $key ]]; then
+            break
+        fi
+        tput cuu "${#files[@]}" >&2
+        dibujar >&2
+    done
+    tput cnorm >&2
+
+    echo "${files[$selected]}"
+}
+
+if [[ $# -lt 1 ]]; then
+    script_path="$(elegir_sh)"
+else
+    script_path="$1"
+fi
+
+if [[ ! -f "$script_path" ]]; then
+    echo "Error: no existe el archivo '$script_path'" >&2
+    exit 1
+fi
+
+script_path="$(realpath "$script_path")"
+nombre="${2:-$(basename "$script_path" .sh)}"
+
+if ! command -v gcc >/dev/null 2>&1; then
+    echo "Error: gcc no está instalado" >&2
+    exit 1
+fi
+
+# Escapar comillas dobles y backslashes de la ruta por si aparecen
+escaped_path="${script_path//\\/\\\\}"
+escaped_path="${escaped_path//\"/\\\"}"
+
+cat > "${nombre}.c" <<EOF
+#include <stdlib.h>
+
+int main(void) {
+    return system("gnome-terminal -- bash -c \\"${escaped_path}; echo; echo 'Presiona ENTER para cerrar...'; read\\"");
+}
+EOF
+
+gcc -O2 -o "$nombre" "${nombre}.c"
+chmod +x "$nombre"
+
+if command -v gio >/dev/null 2>&1; then
+    gio set "$nombre" "metadata::trusted" true 2>/dev/null || true
+fi
+
+echo "Listo: ./$nombre (compilado a partir de $script_path)"
