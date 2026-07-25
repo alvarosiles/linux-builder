@@ -5,10 +5,10 @@ usage() {
   cat <<EOF
 Uso: $0
 
-Pide host, puerto, usuario y contraseña, se conecta a un servidor
-PostgreSQL, lista las bases de datos disponibles y te deja hacer un
-backup o restaurar uno, con menús de flechas ↑↓ + Enter dentro de la
-misma terminal.
+Muestra un menú (flechas ↑↓ + Enter) con los servidores/bases de
+datos conocidos, lista las bases de datos disponibles en el que
+elijas y te deja hacer un backup de la que selecciones. Todo dentro
+de la misma terminal, sin ventanas de diálogo.
 
 Opciones:
   -h, --help    Mostrar esta ayuda
@@ -19,6 +19,30 @@ if [[ "${1:-}" == "-h" || "${1:-}" == "--help" ]]; then
   usage
   exit 0
 fi
+
+# nombre|host|puerto|base de datos (orden alfabético por nombre)
+BASES=(
+  "caja|192.168.5.45|5432|servisofts.caja"
+  "calistenia|192.168.5.18|5432|servisofts.calistenia"
+  "chat|192.168.5.9|5432|servisofts.chat"
+  "compra-venta|192.168.5.41|5432|servisofts.compra_venta"
+  "contabilidad|192.168.5.11|5432|servisofts.contabilidad"
+  "crm|192.168.5.51|5432|servisofts.crm"
+  "drive|192.168.5.17|5432|servisofts.drive"
+  "empresa|192.168.5.29|5432|servisofts.empresa"
+  "facturacion|192.168.5.28|5432|servisofts.facturacion"
+  "geolocation|192.168.5.5|5432|servisofts.geolocation"
+  "inventario|192.168.5.39|5432|servisofts.inventario"
+  "notification|192.168.5.33|5432|servisofts.notification"
+  "proyecto|192.168.5.14|5432|servisofts.proyecto"
+  "roles|192.168.5.16|5432|servisofts.roles_permisos"
+  "serp|192.168.5.48|5432|servisofts.serp"
+  "servicios|192.168.5.1|5432|servisofts.servicio"
+  "staffprousa|192.168.5.53|5432|servisofts.StaffProUsa"
+  "stats|192.168.2.2|5432|servisofts.stats"
+  "usuario|192.168.5.2|5432|servisofts.usuario"
+  "zkteco|192.168.5.32|5432|servisofts.zkteco"
+)
 
 YELLOW='\033[1;33m'
 RESET='\033[0m'
@@ -74,9 +98,17 @@ elegir_opcion() {
   echo "$selected"
 }
 
-read -rp "Host: " PGHOST
-read -rp "Puerto [5432]: " PGPORT
-PGPORT="${PGPORT:-5432}"
+LINEAS=()
+for i in "${!BASES[@]}"; do
+  IFS='|' read -r NOMBRE HOST PUERTO DB <<< "${BASES[$i]}"
+  LINEAS+=("$(printf '%-14s %s' "$NOMBRE" "$HOST:$PUERTO")")
+done
+
+ENCABEZADO=$(printf '%-14s %s' "server" "ip")
+OPCION=$(elegir_opcion "lista de servidores" "$ENCABEZADO" "${LINEAS[@]}")
+echo
+
+IFS='|' read -r NOMBRE PGHOST PGPORT _ <<< "${BASES[$OPCION]}"
 
 read -rp "Usuario [postgres]: " PGUSER
 PGUSER="${PGUSER:-postgres}"
@@ -88,7 +120,7 @@ echo
 export PGPASSWORD
 
 echo
-echo "Conectando a $PGHOST:$PGPORT..."
+echo "Conectando a '$NOMBRE' ($PGHOST:$PGPORT)..."
 echo
 
 mapfile -t DBS < <(psql \

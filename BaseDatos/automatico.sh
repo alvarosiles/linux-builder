@@ -6,9 +6,11 @@ usage() {
 Uso: $0
 
 Muestra un menú (flechas ↑↓ + Enter) con los servidores/bases de
-datos conocidos, lista las bases de datos disponibles en el que
-elijas y te deja hacer un backup de la que selecciones. Todo dentro
-de la misma terminal, sin ventanas de diálogo.
+datos conocidos, pide usuario y contraseña, te deja elegir hacer
+backup o restaurar, y después cada cuánto tiempo repetirlo (2 min,
+10 min, 1 hora, 6 horas, o todos los días a una hora específica).
+Corre una primera vez en esta terminal para probar que funciona, y
+después sigue solo en segundo plano.
 
 Opciones:
   -h, --help    Mostrar esta ayuda
@@ -45,7 +47,18 @@ BASES=(
 )
 
 YELLOW='\033[1;33m'
+GREEN='\033[1;32m'
 RESET='\033[0m'
+
+WEBHOOK_URL="https://discord.com/api/webhooks/1530357203590971483/HdNVfftTH-qb9HoCsX5pTuUpgODT74VjoxzZrJSqDeuceiyN4Ozri14yMX0_7ZjYtW4F"
+
+notificar_discord() {
+  local mensaje="$1"
+  curl -s -o /dev/null \
+    -H "Content-Type: application/json" \
+    -d "{\"content\":\"$mensaje\"}" \
+    "$WEBHOOK_URL" || true
+}
 
 # Menú de flechas genérico: recibe el texto del prompt, una línea de
 # encabezado opcional (vacía si no aplica) y las opciones, devuelve por
@@ -60,11 +73,16 @@ elegir_opcion() {
   local key rest
 
   dibujar() {
+    local ancho=$(( $(tput cols) - 1 ))
+    local texto
     for i in "${!items[@]}"; do
+      tput el
       if [[ $i -eq $selected ]]; then
-        echo -e "${YELLOW}> ${items[$i]}${RESET}"
+        texto="> ${items[$i]}"
+        echo -e "${YELLOW}${texto:0:$ancho}${RESET}"
       else
-        echo "  ${items[$i]}"
+        texto="  ${items[$i]}"
+        echo "${texto:0:$ancho}"
       fi
     done
   }
@@ -132,24 +150,16 @@ ACCIONES=("Hacer backup" "Restaurar un backup")
 ACCION=$(elegir_opcion "¿Qué querés hacer? (↑/↓ y Enter):" "" "${ACCIONES[@]}")
 echo
 
-if [[ "$ACCION" -eq 0 ]]; then
-  DBOPCION=$(elegir_opcion "Seleccioná la base de datos para backup (↑/↓ y Enter):" "" "${DBS[@]}")
-  echo
-
-  PGDATABASE="${DBS[$DBOPCION]}"
-
-  read -rp "Directorio destino [.]: " TARGET
-  TARGET="${TARGET:-.}"
-  mkdir -p "$TARGET"
-
-  TS=$(date +%Y%m%d%H%M%S)
-  OUTFILE="$TARGET/${PGDATABASE}-${TS}.dump"
-
+hacer_backup() {
   echo
   echo "Generando backup de '$PGDATABASE'..."
   echo
 
-  TOTAL_TABLAS=$(psql \
+  TS=$(date +%Y%m%d%H%M%S)
+  local outfile="$TARGET/${PGDATABASE}-${TS}.dump"
+
+  local total_tablas
+  total_tablas=$(psql \
     --host="$PGHOST" \
     --port="$PGPORT" \
     --username="$PGUSER" \
@@ -159,16 +169,16 @@ if [[ "$ACCION" -eq 0 ]]; then
     --pset=pager=off \
     --command="SELECT count(*) FROM pg_catalog.pg_tables WHERE schemaname NOT IN ('pg_catalog','information_schema');")
 
-  ANCHO=30
+  local ancho=30
 
   barra_progreso() {
     local porc=$1
-    local llenas=$(( porc * ANCHO / 100 ))
-    local vacias=$(( ANCHO - llenas ))
+    local llenas=$(( porc * ancho / 100 ))
+    local vacias=$(( ancho - llenas ))
     printf '['
     [[ $llenas -gt 0 ]] && printf '%0.s#' $(seq 1 "$llenas")
     [[ $vacias -gt 0 ]] && printf '%0.s.' $(seq 1 "$vacias")
-    printf '] %3d%% (%d/%d tablas)' "$porc" "$PROCESADAS" "$TOTAL_TABLAS"
+    printf '] %3d%% (%d/%d tablas)' "$porc" "$procesadas" "$total_tablas"
   }
 
   pg_dump \
@@ -176,27 +186,58 @@ if [[ "$ACCION" -eq 0 ]]; then
     --port="$PGPORT" \
     --username="$PGUSER" \
     --format=custom \
-    --file="$OUTFILE" \
+    --file="$outfile" \
     --verbose \
     "$PGDATABASE" 2>&1 >/dev/null | {
-      PROCESADAS=0
+      procesadas=0
       printf '\r%s' "$(barra_progreso 0)"
-      while IFS= read -r LINEA; do
-        if [[ "$LINEA" == *"dumping contents of table"* ]]; then
-          PROCESADAS=$((PROCESADAS + 1))
-          if [[ "$TOTAL_TABLAS" -gt 0 ]]; then
-            PORC=$((PROCESADAS * 100 / TOTAL_TABLAS))
+      while IFS= read -r linea; do
+        if [[ "$linea" == *"dumping contents of table"* ]]; then
+          procesadas=$((procesadas + 1))
+          if [[ "$total_tablas" -gt 0 ]]; then
+            porc=$((procesadas * 100 / total_tablas))
           else
-            PORC=100
+            porc=100
           fi
-          [[ $PORC -gt 100 ]] && PORC=100
-          printf '\r%s' "$(barra_progreso "$PORC")"
+          [[ $porc -gt 100 ]] && porc=100
+          printf '\r%s' "$(barra_progreso "$porc")"
         fi
       done
-      printf '\r%s\n' "$(PROCESADAS=$TOTAL_TABLAS barra_progreso 100)"
+      printf '\r%s\n' "$(procesadas=$total_tablas barra_progreso 100)"
     }
 
-  echo "Backup creado: $OUTFILE"
+  echo "Backup creado: $outfile"
+  notificar_discord "Backup \\\"$PGDATABASE\\\" realizado $(date '+%Y-%m-%d %H:%M:%S')"
+}
+
+hacer_restore() {
+  echo
+  echo "Restaurando '$DUMPFILE' en '$PGDATABASE'..."
+
+  pg_restore \
+    --host="$PGHOST" \
+    --port="$PGPORT" \
+    --username="$PGUSER" \
+    --dbname="$PGDATABASE" \
+    --clean \
+    --if-exists \
+    --no-owner \
+    --verbose \
+    "$DUMPFILE"
+
+  echo "Restauración completada."
+  notificar_discord "Restauración \\\"$PGDATABASE\\\" realizada $(date '+%Y-%m-%d %H:%M:%S')"
+}
+
+if [[ "$ACCION" -eq 0 ]]; then
+  DBOPCION=$(elegir_opcion "Seleccioná la base de datos para backup (↑/↓ y Enter):" "" "${DBS[@]}")
+  echo
+
+  PGDATABASE="${DBS[$DBOPCION]}"
+
+  read -rp "Directorio destino [.]: " TARGET
+  TARGET="${TARGET:-.}"
+  mkdir -p "$TARGET"
 else
   read -rp "Directorio con backups [.]: " BACKUP_DIR
   BACKUP_DIR="${BACKUP_DIR:-.}"
@@ -240,22 +281,112 @@ else
       exit 1
     fi
   fi
-
-  echo
-  echo "Restaurando '$DUMPFILE' en '$PGDATABASE'..."
-
-  pg_restore \
-    --host="$PGHOST" \
-    --port="$PGPORT" \
-    --username="$PGUSER" \
-    --dbname="$PGDATABASE" \
-    --clean \
-    --if-exists \
-    --no-owner \
-    --verbose \
-    "$DUMPFILE"
-
-  echo "Restauración completada."
 fi
+
+FRECUENCIA_TXT=("2 min" "10 min" "1 hora" "6 horas" "hora en específico")
+FRECUENCIA_SEG=(120 600 3600 21600 0)
+
+FRECOPCION=$(elegir_opcion "¿Cada qué tiempo querés que se ejecute? (↑/↓ y Enter):" "" "${FRECUENCIA_TXT[@]}")
+echo
+
+if [[ "$FRECOPCION" -eq 4 ]]; then
+  MODO="diario"
+
+  HORAS_TXT=("6 am" "10 am" "12 pm" "18 pm" "23 pm")
+  HORAS_24=("06:00" "10:00" "12:00" "18:00" "23:00")
+
+  HORAOPCION=$(elegir_opcion "¿A qué hora? (↑/↓ y Enter):" "" "${HORAS_TXT[@]}")
+  echo
+
+  HORA="${HORAS_24[$HORAOPCION]}"
+  PROGRAMACION_TXT="todos los días a las ${HORAS_TXT[$HORAOPCION]}"
+else
+  MODO="intervalo"
+  INTERVALO_SEG="${FRECUENCIA_SEG[$FRECOPCION]}"
+  PROGRAMACION_TXT="cada ${FRECUENCIA_TXT[$FRECOPCION]}"
+fi
+
+# Calcula cuántos segundos faltan hasta la próxima ejecución.
+segundos_hasta_proxima() {
+  if [[ "$MODO" == "intervalo" ]]; then
+    echo "$INTERVALO_SEG"
+    return
+  fi
+
+  local ahora fecha candidato
+  ahora=$(date +%s)
+  fecha=$(date -d "+0 days" +%F)
+  candidato=$(date -d "${fecha}T${HORA}:00" +%s)
+  if [[ "$candidato" -le "$ahora" ]]; then
+    fecha=$(date -d "+1 days" +%F)
+    candidato=$(date -d "${fecha}T${HORA}:00" +%s)
+  fi
+
+  echo $(( candidato - ahora ))
+}
+
+if [[ "$ACCION" -eq 0 ]]; then
+  ACCION_TXT="backup de '$PGDATABASE'"
+else
+  ACCION_TXT="restauración de '$DUMPFILE' en '$PGDATABASE'"
+fi
+
+echo -e "${GREEN}✔ Automatización configurada con éxito: se hará $ACCION_TXT $PROGRAMACION_TXT.${RESET}"
+echo
+
+ESTADO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/.automatico_estado"
+mkdir -p "$ESTADO_DIR"
+LOG_FILE="$ESTADO_DIR/$$-$(date +%Y%m%d%H%M%S).log"
+
+# Primera ejecución, visible en esta terminal.
+echo "[$(date '+%Y-%m-%d %H:%M:%S')] Ejecutando..."
+if [[ "$ACCION" -eq 0 ]]; then
+  hacer_backup
+else
+  hacer_restore
+fi
+PROXIMA=$(date -d "@$(( $(date +%s) + $(segundos_hasta_proxima) ))" '+%Y-%m-%d %H:%M:%S')
+echo -e "${GREEN}✔ Listo.${RESET} Próxima ejecución: $PROXIMA ($PROGRAMACION_TXT)"
+echo
+
+# De acá en adelante sigue en segundo plano, sin ocupar la terminal:
+# ya podés cerrarla o volver a correr el script para armar otro ciclo.
+(
+  MI_PID=$BASHPID
+  ESTADO_FILE="$ESTADO_DIR/$MI_PID.info"
+  trap '' HUP
+  trap 'rm -f "$ESTADO_FILE"' EXIT
+
+  cat > "$ESTADO_FILE" <<EOF
+PID=$MI_PID
+TIPO=db
+SERVIDOR=$(printf '%q' "$NOMBRE")
+HOST=$(printf '%q' "$PGHOST")
+PUERTO=$(printf '%q' "$PGPORT")
+ACCION=$(printf '%q' "$ACCION_TXT")
+INTERVALO=$(printf '%q' "$PROGRAMACION_TXT")
+INICIO=$(printf '%q' "$(date '+%Y-%m-%d %H:%M:%S')")
+EOF
+
+  while true; do
+    sleep "$(segundos_hasta_proxima)"
+    echo "[$(date '+%Y-%m-%d %H:%M:%S')] Ejecutando..."
+    if [[ "$ACCION" -eq 0 ]]; then
+      hacer_backup
+    else
+      hacer_restore
+    fi
+    proxima=$(date -d "@$(( $(date +%s) + $(segundos_hasta_proxima) ))" '+%Y-%m-%d %H:%M:%S')
+    echo "✔ Listo. Próxima ejecución: $proxima ($PROGRAMACION_TXT)"
+  done
+) >>"$LOG_FILE" 2>&1 </dev/null &
+
+BG_PID=$!
+disown "$BG_PID"
+
+echo -e "${GREEN}✔ Pasando a segundo plano${RESET} (PID $BG_PID)."
+echo "Log de las próximas ejecuciones: $LOG_FILE"
+echo "Ya podés usar esta terminal para otra cosa, por ejemplo correr $0 de nuevo para armar otro ciclo."
+echo "Usá stop_automatico.sh para ver o detener las tareas automáticas activas."
 
 exit 0
