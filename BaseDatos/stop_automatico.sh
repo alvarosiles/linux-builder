@@ -79,7 +79,8 @@ ESTADO_DIRS=(
   "$SCRIPT_DIR/../.saludo_estado"
 )
 
-PIDS=()
+TIPOS=()
+CLAVES=()
 ARCHIVOS=()
 LINEAS=()
 
@@ -89,37 +90,56 @@ for ESTADO_DIR in "${ESTADO_DIRS[@]}"; do
   for archivo in "$ESTADO_DIR"/*.info; do
     [[ -e "$archivo" ]] || continue
 
-    PID="$(basename "$archivo" .info)"
+    CLAVE="$(basename "$archivo" .info)"
 
-    if ! kill -0 "$PID" 2>/dev/null; then
-      # el proceso ya no existe: era un archivo de estado viejo
-      rm -f "$archivo"
-      continue
-    fi
-
-    TIPO=""; SERVIDOR=""; HOST=""; PUERTO=""; ACCION=""; INTERVALO=""; INICIO=""; WEBHOOK=""
+    TIPO=""; SERVIDOR=""; HOST=""; PUERTO=""; ACCION=""; INTERVALO=""; INICIO=""; JOB_ID=""
     # shellcheck source=/dev/null
     source "$archivo"
 
-    case "$TIPO" in
-      db)
-        LINEA="$(printf 'PID %-7s %-14s %-21s %s' "$PID" "$SERVIDOR" "$HOST:$PUERTO" "$ACCION - $INTERVALO (desde $INICIO)")"
-        ;;
-      saludo)
-        LINEA="$(printf 'PID %-7s %-14s %s' "$PID" "saludo-discord" "hola cada 2 min (desde $INICIO)")"
-        ;;
-      *)
-        LINEA="$(printf 'PID %-7s %s' "$PID" "tarea desconocida")"
-        ;;
-    esac
+    if [[ "$TIPO" == "db-systemd" ]]; then
+      if ! systemctl is-active --quiet "automatico-db@${JOB_ID}.service" 2>/dev/null; then
+        # la tarea ya no está activa en systemd: era un archivo de estado viejo
+        rm -f "$archivo"
+        continue
+      fi
+      CLAVE="$JOB_ID"
+      LINEA="$(printf 'JOB %-16s %-14s %-21s %s' "$JOB_ID" "$SERVIDOR" "$HOST:$PUERTO" "$ACCION - $INTERVALO (desde $INICIO)")"
+    elif [[ "$TIPO" == "db-todas-systemd" ]]; then
+      if ! systemctl is-active --quiet "automatico-db-todas@${JOB_ID}.service" 2>/dev/null; then
+        # la tarea ya no está activa en systemd: era un archivo de estado viejo
+        rm -f "$archivo"
+        continue
+      fi
+      CLAVE="$JOB_ID"
+      LINEA="$(printf 'JOB %-16s %-14s %s' "$JOB_ID" "todas-las-bases" "$ACCION - $INTERVALO (desde $INICIO)")"
+    else
+      if ! kill -0 "$CLAVE" 2>/dev/null; then
+        # el proceso ya no existe: era un archivo de estado viejo
+        rm -f "$archivo"
+        continue
+      fi
 
-    PIDS+=("$PID")
+      case "$TIPO" in
+        db)
+          LINEA="$(printf 'PID %-7s %-14s %-21s %s' "$CLAVE" "$SERVIDOR" "$HOST:$PUERTO" "$ACCION - $INTERVALO (desde $INICIO)")"
+          ;;
+        saludo)
+          LINEA="$(printf 'PID %-7s %-14s %s' "$CLAVE" "saludo-discord" "hola cada 2 min (desde $INICIO)")"
+          ;;
+        *)
+          LINEA="$(printf 'PID %-7s %s' "$CLAVE" "tarea desconocida")"
+          ;;
+      esac
+    fi
+
+    TIPOS+=("$TIPO")
+    CLAVES+=("$CLAVE")
     ARCHIVOS+=("$archivo")
     LINEAS+=("$LINEA")
   done
 done
 
-if [[ ${#PIDS[@]} -eq 0 ]]; then
+if [[ ${#CLAVES[@]} -eq 0 ]]; then
   echo "No hay tareas automáticas corriendo."
   exit 0
 fi
@@ -127,29 +147,42 @@ fi
 OPCION=$(elegir_opcion "Tareas automáticas corriendo (↑/↓ y Enter para detener):" "" "${LINEAS[@]}")
 echo
 
-PID_ELEGIDO="${PIDS[$OPCION]}"
+TIPO_ELEGIDO="${TIPOS[$OPCION]}"
+CLAVE_ELEGIDA="${CLAVES[$OPCION]}"
 ARCHIVO_ELEGIDO="${ARCHIVOS[$OPCION]}"
 
-read -rp "¿Detener la tarea PID $PID_ELEGIDO? (s/n): " CONFIRMAR
+read -rp "¿Detener esta tarea? (s/n): " CONFIRMAR
 if [[ "$CONFIRMAR" != "s" && "$CONFIRMAR" != "S" ]]; then
   echo "Cancelado."
   exit 0
 fi
 
-kill -TERM "$PID_ELEGIDO" 2>/dev/null || true
+if [[ "$TIPO_ELEGIDO" == "db-systemd" || "$TIPO_ELEGIDO" == "db-todas-systemd" ]]; then
+  SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+  if [[ "$TIPO_ELEGIDO" == "db-todas-systemd" ]]; then
+    SERVICIO="automatico-db-todas@${CLAVE_ELEGIDA}.service"
+  else
+    SERVICIO="automatico-db@${CLAVE_ELEGIDA}.service"
+  fi
+  sudo systemctl disable --now "$SERVICIO"
+  rm -f "$ARCHIVO_ELEGIDO" "$SCRIPT_DIR/.automatico_estado/jobs/${CLAVE_ELEGIDA}.conf"
+  echo -e "${GREEN}✔ Tarea $CLAVE_ELEGIDA detenida y desactivada.${RESET}"
+else
+  kill -TERM "$CLAVE_ELEGIDA" 2>/dev/null || true
 
-for _ in 1 2 3 4 5; do
-  kill -0 "$PID_ELEGIDO" 2>/dev/null || break
-  sleep 0.5
-done
+  for _ in 1 2 3 4 5; do
+    kill -0 "$CLAVE_ELEGIDA" 2>/dev/null || break
+    sleep 0.5
+  done
 
-if kill -0 "$PID_ELEGIDO" 2>/dev/null; then
-  echo "El proceso no respondió, forzando..."
-  kill -KILL "$PID_ELEGIDO" 2>/dev/null || true
+  if kill -0 "$CLAVE_ELEGIDA" 2>/dev/null; then
+    echo "El proceso no respondió, forzando..."
+    kill -KILL "$CLAVE_ELEGIDA" 2>/dev/null || true
+  fi
+
+  rm -f "$ARCHIVO_ELEGIDO"
+
+  echo -e "${GREEN}✔ Tarea PID $CLAVE_ELEGIDA detenida.${RESET}"
 fi
-
-rm -f "$ARCHIVO_ELEGIDO"
-
-echo -e "${GREEN}✔ Tarea PID $PID_ELEGIDO detenida.${RESET}"
 
 exit 0
