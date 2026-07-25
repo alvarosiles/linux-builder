@@ -60,9 +60,61 @@ BASES=(
   "zkteco|192.168.5.32|5432|servisofts.zkteco"
 )
 
+YELLOW='\033[1;33m'
 GREEN='\033[1;32m'
 RED='\033[1;31m'
 RESET='\033[0m'
+
+# Menú de flechas genérico: recibe el texto del prompt, una línea de
+# encabezado opcional (vacía si no aplica) y las opciones, devuelve por
+# stdout el índice elegido (0-based).
+elegir_opcion() {
+  local prompt="$1"
+  local encabezado="$2"
+  shift 2
+  local -a items=("$@")
+  local total=${#items[@]}
+  local selected=0
+  local key rest
+
+  dibujar() {
+    local ancho=$(( $(tput cols) - 1 ))
+    local texto
+    for i in "${!items[@]}"; do
+      tput el
+      if [[ $i -eq $selected ]]; then
+        texto="> ${items[$i]}"
+        echo -e "${YELLOW}${texto:0:$ancho}${RESET}"
+      else
+        texto="  ${items[$i]}"
+        echo "${texto:0:$ancho}"
+      fi
+    done
+  }
+
+  echo -e "${YELLOW}${prompt}${RESET}" >&2
+  echo >&2
+  [[ -n "$encabezado" ]] && echo " $encabezado" >&2
+  tput civis >&2
+  dibujar >&2
+  while true; do
+    IFS= read -rsn1 key
+    if [[ $key == $'\x1b' ]]; then
+      read -rsn2 -t 0.01 rest || true
+      case "$rest" in
+        '[A') ((selected--)) || true; [[ $selected -lt 0 ]] && selected=$((total - 1)) ;;
+        '[B') ((selected++)) || true; [[ $selected -ge $total ]] && selected=0 ;;
+      esac
+    elif [[ -z $key ]]; then
+      break
+    fi
+    tput cuu "$total" >&2
+    dibujar >&2
+  done
+  tput cnorm >&2
+
+  echo "$selected"
+}
 
 WEBHOOK_URL="https://discord.com/api/webhooks/1530357203590971483/HdNVfftTH-qb9HoCsX5pTuUpgODT74VjoxzZrJSqDeuceiyN4Ozri14yMX0_7ZjYtW4F"
 
@@ -97,12 +149,15 @@ if [[ -z "$RUN_JOB_ID" ]]; then
   read -rp "¿Repetir este backup todos los días automáticamente? (s/n): " DIARIO
   if [[ "$DIARIO" == "s" || "$DIARIO" == "S" ]]; then
     MODO="diario"
-    while true; do
-      read -rp "¿A qué hora, todos los días? (HH:MM, 24h): " HORA
-      [[ "$HORA" =~ ^([01][0-9]|2[0-3]):[0-5][0-9]$ ]] && break
-      echo "Formato inválido, probá de nuevo (ej: 02:30)."
-    done
-    PROGRAMACION_TXT="todos los días a las $HORA"
+
+    HORAS_TXT=("18 pm" "22 pm" "23 pm")
+    HORAS_24=("18:00" "22:00" "23:00")
+
+    HORAOPCION=$(elegir_opcion "¿A qué hora, todos los días? (↑/↓ y Enter):" "" "${HORAS_TXT[@]}")
+    echo
+
+    HORA="${HORAS_24[$HORAOPCION]}"
+    PROGRAMACION_TXT="todos los días a las ${HORAS_TXT[$HORAOPCION]}"
   else
     MODO="una-vez"
     PROGRAMACION_TXT="una sola vez"
