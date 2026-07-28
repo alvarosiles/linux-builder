@@ -1,5 +1,5 @@
 #!/bin/bash
-### 📡 Dashboard de monitoreo de servidores (ping)
+### 🎯 Monitoreo de servidores (ping)
 #
 # Revisa por ping la disponibilidad y latencia de los servidores conocidos,
 # agrupados por área, y muestra un resumen con estado online/offline.

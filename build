@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# Convierte un script .sh en un ejecutable compilado que corre con doble
+# 🎯 Convierte un script .sh en un ejecutable compilado que corre con doble
 # clic desde Nautilus (sin el aviso de "¿Ejecutar o Mostrar?").
 #
 # Uso: ./build /ruta/al/script.sh [nombre_salida]

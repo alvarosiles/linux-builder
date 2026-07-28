@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-### 📄 Script de visualización remota del log de facturación
+### 🎯 Visualización log de facturación
 #
 # Se conecta por SSH al servidor de facturación, levanta el stack con
 # ./servisofts.sh up (respondiendo solo el menú y la contraseña) y deja
