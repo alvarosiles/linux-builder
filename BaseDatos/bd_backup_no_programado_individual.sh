@@ -17,7 +17,7 @@ Uso: $0
 Muestra un menú (flechas ↑↓ + Enter) con los servidores/bases de
 datos conocidos, pide usuario y contraseña, te deja elegir hacer
 backup o restaurar, lo ejecuta una sola vez y termina. A diferencia
-de bd_backup_programado.sh, no pregunta frecuencia ni queda como
+de bd_backup_programado_uno_por_uno.sh, no pregunta frecuencia ni queda como
 servicio systemd.
 
 Opciones:
