@@ -25,6 +25,16 @@ if [[ "${1:-}" == "-h" || "${1:-}" == "--help" ]]; then
   exit 0
 fi
 
+CREDENCIALES="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/credenciales.sh"
+if [[ ! -f "$CREDENCIALES" ]]; then
+  echo "Falta $CREDENCIALES (con PGUSER y PGPASSWORD). Creá ese archivo primero." >&2
+  exit 1
+fi
+# shellcheck source=/dev/null
+source "$CREDENCIALES"
+PGUSER_DEFAULT="$PGUSER"
+PGPASSWORD_DEFAULT="$PGPASSWORD"
+
 # nombre|host|puerto|base de datos (orden alfabético por nombre)
 BASES=(
   "caja|192.168.5.45|5432|servisofts.caja"
@@ -115,13 +125,14 @@ echo
 
 IFS='|' read -r NOMBRE PGHOST PGPORT _ <<< "${BASES[$OPCION]}"
 
-read -rp "Usuario [postgres]: " PGUSER
-PGUSER="${PGUSER:-postgres}"
-[[ "$PGUSER" == "p" ]] && PGUSER="postgres"
+read -rp "Usuario [$PGUSER_DEFAULT]: " PGUSER
+PGUSER="${PGUSER:-$PGUSER_DEFAULT}"
+PGUSER="$(resolver_atajo_p "$PGUSER" "$PGUSER_DEFAULT")"
 
-read -rsp "Contraseña: " PGPASSWORD
+read -rsp "Contraseña [Enter = la de siempre]: " PGPASSWORD
 echo
-[[ "$PGPASSWORD" == "p" ]] && PGPASSWORD="postgres"
+PGPASSWORD="${PGPASSWORD:-$PGPASSWORD_DEFAULT}"
+PGPASSWORD="$(resolver_atajo_p "$PGPASSWORD" "$PGPASSWORD_DEFAULT")"
 export PGPASSWORD
 
 echo

@@ -33,6 +33,16 @@ ESTADO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/.automatico_estado"
 JOBS_DIR="$ESTADO_DIR/jobs"
 mkdir -p "$JOBS_DIR"
 
+CREDENCIALES="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/credenciales.sh"
+if [[ ! -f "$CREDENCIALES" ]]; then
+  echo "Falta $CREDENCIALES (con PGUSER, PGPASSWORD y WEBHOOK_URL). Creá ese archivo primero." >&2
+  exit 1
+fi
+# shellcheck source=/dev/null
+source "$CREDENCIALES"
+PGUSER_DEFAULT="$PGUSER"
+PGPASSWORD_DEFAULT="$PGPASSWORD"
+
 # Si nos invoca systemd (automatico-db@<job>.service), no preguntamos nada:
 # cargamos la configuración guardada la primera vez que se armó el ciclo.
 RUN_JOB_ID=""
@@ -75,8 +85,6 @@ BASES=(
 YELLOW='\033[1;33m'
 GREEN='\033[1;32m'
 RESET='\033[0m'
-
-WEBHOOK_URL="https://discord.com/api/webhooks/1530357203590971483/HdNVfftTH-qb9HoCsX5pTuUpgODT74VjoxzZrJSqDeuceiyN4Ozri14yMX0_7ZjYtW4F"
 
 notificar_discord() {
   local mensaje="$1"
@@ -150,13 +158,14 @@ if [[ -z "$RUN_JOB_ID" ]]; then
 
   IFS='|' read -r NOMBRE PGHOST PGPORT _ <<< "${BASES[$OPCION]}"
 
-  read -rp "Usuario [postgres]: " PGUSER
-  PGUSER="${PGUSER:-postgres}"
-  [[ "$PGUSER" == "p" ]] && PGUSER="postgres"
+  read -rp "Usuario [$PGUSER_DEFAULT]: " PGUSER
+  PGUSER="${PGUSER:-$PGUSER_DEFAULT}"
+  PGUSER="$(resolver_atajo_p "$PGUSER" "$PGUSER_DEFAULT")"
 
-  read -rsp "Contraseña: " PGPASSWORD
+  read -rsp "Contraseña [Enter = la de siempre]: " PGPASSWORD
   echo
-  [[ "$PGPASSWORD" == "p" ]] && PGPASSWORD="postgres"
+  PGPASSWORD="${PGPASSWORD:-$PGPASSWORD_DEFAULT}"
+  PGPASSWORD="$(resolver_atajo_p "$PGPASSWORD" "$PGPASSWORD_DEFAULT")"
   export PGPASSWORD
 
   echo

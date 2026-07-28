@@ -31,9 +31,16 @@ if ! command -v sshpass >/dev/null 2>&1; then
   exit 1
 fi
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+CREDENCIALES="$SCRIPT_DIR/credenciales.sh"
+if [[ ! -f "$CREDENCIALES" ]]; then
+  echo "Falta $CREDENCIALES (con SSH_USER y PASS). Creá ese archivo primero." >&2
+  exit 1
+fi
+# shellcheck source=/dev/null
+source "$CREDENCIALES"
+
 HOST="192.168.2.5"
-SSH_USER="servisofts"
-PASS="servisofts"
 
 echo "Conectando a $SSH_USER@$HOST..."
 echo

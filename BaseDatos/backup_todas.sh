@@ -12,9 +12,9 @@ usage() {
 Uso: $0
 
 Hace el backup de TODAS las bases de datos conocidas (una por cada
-servidor de Servisofts, usuario/contraseña postgres/postgres) en una
-sola pasada. Cada corrida se guarda en su propia subcarpeta con fecha
-y hora, dentro del directorio destino que elijas.
+servidor de Servisofts, con las credenciales de credenciales.sh) en
+una sola pasada. Cada corrida se guarda en su propia subcarpeta con
+fecha y hora, dentro del directorio destino que elijas.
 
 Te pregunta si querés que esto se repita todos los días y, si decís
 que sí, a qué hora. Corre una primera vez en esta terminal para
@@ -38,8 +38,13 @@ ESTADO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/.automatico_estado"
 JOBS_DIR="$ESTADO_DIR/jobs"
 mkdir -p "$JOBS_DIR"
 
-PGUSER="postgres"
-PGPASSWORD="postgres"
+CREDENCIALES="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/credenciales.sh"
+if [[ ! -f "$CREDENCIALES" ]]; then
+  echo "Falta $CREDENCIALES (con PGUSER, PGPASSWORD y WEBHOOK_URL). Creá ese archivo primero." >&2
+  exit 1
+fi
+# shellcheck source=/dev/null
+source "$CREDENCIALES"
 export PGPASSWORD
 
 # nombre|host|puerto|base de datos (orden alfabético por nombre)
@@ -121,8 +126,6 @@ elegir_opcion() {
 
   echo "$selected"
 }
-
-WEBHOOK_URL="https://discord.com/api/webhooks/1530357203590971483/HdNVfftTH-qb9HoCsX5pTuUpgODT74VjoxzZrJSqDeuceiyN4Ozri14yMX0_7ZjYtW4F"
 
 notificar_discord() {
   local mensaje="$1"
