@@ -1,4 +1,9 @@
 #!/usr/bin/env bash
+### 🗄️ Script interactivo de backup/restore por servidor
+#
+# Muestra un menú con los servidores/bases conocidos, se conecta al que
+# elijas, lista sus bases de datos y te deja hacer un backup o restaurar
+# un dump, todo con menús de flechas dentro de la misma terminal.
 set -euo pipefail
 
 usage() {

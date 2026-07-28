@@ -1,7 +1,10 @@
 #!/bin/bash
-# Version anterior del dashboard: solo monitoreo (ping + estado/latencia),
-# sin logica de encendido y sin source de servidores_config.sh. Sirve de
-# referencia o para un cron que solo necesite chequear estado sin interaccion.
+### 📡 Dashboard de monitoreo de servidores (ping)
+#
+# Revisa por ping la disponibilidad y latencia de los servidores conocidos,
+# agrupados por área, y muestra un resumen con estado online/offline.
+# Es la versión anterior del dashboard: solo monitoreo, sin lógica de
+# encendido remoto ni source de servidores_config.sh.
 
 export LC_NUMERIC=C
 

@@ -1,4 +1,9 @@
 #!/usr/bin/env bash
+### 🤖 Script de backup/restore automático y programado
+#
+# Menú de servidores/bases conocidos, elegís backup o restore y cada
+# cuánto repetirlo (intervalo fijo u hora diaria); corre una vez en la
+# terminal y después queda como servicio systemd para seguir solo.
 set -euo pipefail
 
 usage() {

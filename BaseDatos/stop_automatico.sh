@@ -1,4 +1,8 @@
 #!/usr/bin/env bash
+### 🎯 Script de control y administración de procesos en segundo plano
+#
+# Script encargado de supervisar y detener procesos en segundo plano,
+# mediante el manejo de PIDs y la integración con systemd.
 set -euo pipefail
 
 usage() {

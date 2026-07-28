@@ -1,4 +1,9 @@
 #!/usr/bin/env bash
+### 🔧 Script manual de backup/restore (host/puerto a mano)
+#
+# Pide host, puerto, usuario y contraseña de un servidor Postgres
+# cualquiera (no de la lista conocida), lista sus bases y te deja hacer
+# un backup o restaurar un dump, todo en la misma terminal.
 set -euo pipefail
 
 usage() {

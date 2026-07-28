@@ -1,4 +1,10 @@
 #!/usr/bin/env bash
+### 💾 Script de backup de todas las bases de datos
+#
+# Hace el backup de las 20 bases conocidas en una sola pasada, guardando
+# cada corrida en su propia subcarpeta con fecha y hora. Pregunta si hay
+# que repetirlo todos los días y a qué hora, y queda como servicio
+# systemd si corresponde.
 set -euo pipefail
 
 usage() {
