@@ -6,6 +6,9 @@
 # el log de los contenedores pegado en la terminal en vivo.
 set -euo pipefail
 
+# Ctrl+C corta la conexión SSH y termina el script de inmediato.
+trap 'echo; echo "Cancelado (Ctrl+C)."; exit 130' INT
+
 usage() {
   cat <<EOF
 Uso: $0

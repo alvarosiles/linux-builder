@@ -6,6 +6,10 @@
 # Es la versión anterior del dashboard: solo monitoreo, sin lógica de
 # encendido remoto ni source de servidores_config.sh.
 
+# Ctrl+C corta el loop de pings de inmediato en vez de seguir con el
+# siguiente servidor.
+trap 'echo; echo "Cancelado (Ctrl+C)."; exit 130' INT
+
 export LC_NUMERIC=C
 
 declare -A servidores=(

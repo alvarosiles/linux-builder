@@ -6,6 +6,10 @@
 # nada corriendo en segundo plano ni se instala como servicio.
 set -euo pipefail
 
+# Ctrl+C corta todo de inmediato (incluso en medio de un loop o un
+# pg_dump) y deja el cursor visible si quedó oculto por un menú.
+trap 'tput cnorm 2>/dev/null || true; echo; echo "Cancelado (Ctrl+C)."; exit 130' INT
+
 usage() {
   cat <<EOF
 Uso: $0
@@ -35,30 +39,6 @@ fi
 source "$CREDENCIALES"
 PGUSER_DEFAULT="$PGUSER"
 PGPASSWORD_DEFAULT="$PGPASSWORD"
-
-# nombre|host|puerto|base de datos (orden alfabético por nombre)
-BASES=(
-  "caja|192.168.5.45|5432|servisofts.caja"
-  "calistenia|192.168.5.18|5432|servisofts.calistenia"
-  "chat|192.168.5.9|5432|servisofts.chat"
-  "compra-venta|192.168.5.41|5432|servisofts.compra_venta"
-  "contabilidad|192.168.5.11|5432|servisofts.contabilidad"
-  "crm|192.168.5.51|5432|servisofts.crm"
-  "drive|192.168.5.17|5432|servisofts.drive"
-  "empresa|192.168.5.29|5432|servisofts.empresa"
-  "facturacion|192.168.5.28|5432|servisofts.facturacion"
-  "geolocation|192.168.5.5|5432|servisofts.geolocation"
-  "inventario|192.168.5.39|5432|servisofts.inventario"
-  "notification|192.168.5.33|5432|servisofts.notification"
-  "proyecto|192.168.5.14|5432|servisofts.proyecto"
-  "roles|192.168.5.16|5432|servisofts.roles_permisos"
-  "serp|192.168.5.48|5432|servisofts.serp"
-  "servicios|192.168.5.1|5432|servisofts.servicio"
-  "staffprousa|192.168.5.53|5432|servisofts.StaffProUsa"
-  "stats|192.168.2.2|5432|servisofts.stats"
-  "usuario|192.168.5.2|5432|servisofts.usuario"
-  "zkteco|192.168.5.32|5432|servisofts.zkteco"
-)
 
 YELLOW='\033[1;33m'
 GREEN='\033[1;32m'

@@ -5,6 +5,10 @@
 # mediante el manejo de PIDs y la integración con systemd.
 set -euo pipefail
 
+# Ctrl+C corta todo de inmediato y deja el cursor visible si quedó
+# oculto por el menú.
+trap 'tput cnorm 2>/dev/null || true; echo; echo "Cancelado (Ctrl+C)."; exit 130' INT
+
 usage() {
   cat <<EOF
 Uso: $0
