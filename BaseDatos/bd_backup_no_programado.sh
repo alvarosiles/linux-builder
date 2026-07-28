@@ -1,19 +1,20 @@
 #!/usr/bin/env bash
-### 🔧 Script manual de backup/restore (host/puerto a mano)
+### 🗄️ Script de backup/restore manual (sin programar)
 #
-# Pide host, puerto, usuario y contraseña de un servidor Postgres
-# cualquiera (no de la lista conocida), lista sus bases y te deja hacer
-# un backup o restaurar un dump, todo en la misma terminal.
+# Menú de servidores/bases conocidos, elegís backup o restore, se
+# ejecuta una sola vez ahí mismo en la terminal y termina. No queda
+# nada corriendo en segundo plano ni se instala como servicio.
 set -euo pipefail
 
 usage() {
   cat <<EOF
 Uso: $0
 
-Pide host, puerto, usuario y contraseña, se conecta a un servidor
-PostgreSQL, lista las bases de datos disponibles y te deja hacer un
-backup o restaurar uno, con menús de flechas ↑↓ + Enter dentro de la
-misma terminal.
+Muestra un menú (flechas ↑↓ + Enter) con los servidores/bases de
+datos conocidos, pide usuario y contraseña, te deja elegir hacer
+backup o restaurar, lo ejecuta una sola vez y termina. A diferencia
+de bd_backup_programado.sh, no pregunta frecuencia ni queda como
+servicio systemd.
 
 Opciones:
   -h, --help    Mostrar esta ayuda
@@ -27,7 +28,7 @@ fi
 
 CREDENCIALES="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/credenciales.sh"
 if [[ ! -f "$CREDENCIALES" ]]; then
-  echo "Falta $CREDENCIALES (con PGUSER y PGPASSWORD). Creá ese archivo primero." >&2
+  echo "Falta $CREDENCIALES (con PGUSER, PGPASSWORD y WEBHOOK_URL). Creá ese archivo primero." >&2
   exit 1
 fi
 # shellcheck source=/dev/null
@@ -35,8 +36,42 @@ source "$CREDENCIALES"
 PGUSER_DEFAULT="$PGUSER"
 PGPASSWORD_DEFAULT="$PGPASSWORD"
 
+# nombre|host|puerto|base de datos (orden alfabético por nombre)
+BASES=(
+  "caja|192.168.5.45|5432|servisofts.caja"
+  "calistenia|192.168.5.18|5432|servisofts.calistenia"
+  "chat|192.168.5.9|5432|servisofts.chat"
+  "compra-venta|192.168.5.41|5432|servisofts.compra_venta"
+  "contabilidad|192.168.5.11|5432|servisofts.contabilidad"
+  "crm|192.168.5.51|5432|servisofts.crm"
+  "drive|192.168.5.17|5432|servisofts.drive"
+  "empresa|192.168.5.29|5432|servisofts.empresa"
+  "facturacion|192.168.5.28|5432|servisofts.facturacion"
+  "geolocation|192.168.5.5|5432|servisofts.geolocation"
+  "inventario|192.168.5.39|5432|servisofts.inventario"
+  "notification|192.168.5.33|5432|servisofts.notification"
+  "proyecto|192.168.5.14|5432|servisofts.proyecto"
+  "roles|192.168.5.16|5432|servisofts.roles_permisos"
+  "serp|192.168.5.48|5432|servisofts.serp"
+  "servicios|192.168.5.1|5432|servisofts.servicio"
+  "staffprousa|192.168.5.53|5432|servisofts.StaffProUsa"
+  "stats|192.168.2.2|5432|servisofts.stats"
+  "usuario|192.168.5.2|5432|servisofts.usuario"
+  "zkteco|192.168.5.32|5432|servisofts.zkteco"
+)
+
 YELLOW='\033[1;33m'
+GREEN='\033[1;32m'
+NARANJA='\033[38;5;208m'
 RESET='\033[0m'
+
+notificar_discord() {
+  local mensaje="$1"
+  curl -s -o /dev/null \
+    -H "Content-Type: application/json" \
+    -d "{\"content\":\"$mensaje\"}" \
+    "$WEBHOOK_URL" || true
+}
 
 # Menú de flechas genérico: recibe el texto del prompt, una línea de
 # encabezado opcional (vacía si no aplica) y las opciones, devuelve por
@@ -58,6 +93,9 @@ elegir_opcion() {
       if [[ $i -eq $selected ]]; then
         texto="> ${items[$i]}"
         echo -e "${YELLOW}${texto:0:$ancho}${RESET}"
+      elif [[ -n "${ELEGIR_NARANJA_IDX:-}" && $i -eq $ELEGIR_NARANJA_IDX ]]; then
+        texto="  ${items[$i]}"
+        echo -e "${NARANJA}${texto:0:$ancho}${RESET}"
       else
         texto="  ${items[$i]}"
         echo "${texto:0:$ancho}"
@@ -89,9 +127,28 @@ elegir_opcion() {
   echo "$selected"
 }
 
-read -rp "Host: " PGHOST
-read -rp "Puerto [5432]: " PGPORT
-PGPORT="${PGPORT:-5432}"
+LINEAS=()
+for i in "${!BASES[@]}"; do
+  IFS='|' read -r NOMBRE HOST PUERTO DB <<< "${BASES[$i]}"
+  LINEAS+=("$(printf '%-14s %s' "$NOMBRE" "$HOST:$PUERTO")")
+done
+LINEAS+=("$(printf '%-14s %s' "manual" "Escribir la IP a mano")")
+IDX_MANUAL=${#BASES[@]}
+
+ENCABEZADO=$(printf '%-14s %s' "server" "ip")
+ELEGIR_NARANJA_IDX="$IDX_MANUAL"
+OPCION=$(elegir_opcion "lista de servidores" "$ENCABEZADO" "${LINEAS[@]}")
+unset ELEGIR_NARANJA_IDX
+echo
+
+if [[ "$OPCION" -eq "$IDX_MANUAL" ]]; then
+  read -rp "IP del servidor: " PGHOST
+  read -rp "Puerto [5432]: " PGPORT
+  PGPORT="${PGPORT:-5432}"
+  NOMBRE="manual"
+else
+  IFS='|' read -r NOMBRE PGHOST PGPORT _ <<< "${BASES[$OPCION]}"
+fi
 
 read -rp "Usuario [$PGUSER_DEFAULT]: " PGUSER
 PGUSER="${PGUSER:-$PGUSER_DEFAULT}"
@@ -104,7 +161,7 @@ PGPASSWORD="$(resolver_atajo_p "$PGPASSWORD" "$PGPASSWORD_DEFAULT")"
 export PGPASSWORD
 
 echo
-echo "Conectando a $PGHOST:$PGPORT..."
+echo "Conectando a '$NOMBRE' ($PGHOST:$PGPORT)..."
 echo
 
 mapfile -t DBS < <(psql \
@@ -185,7 +242,8 @@ if [[ "$ACCION" -eq 0 ]]; then
       printf '\r%s\n' "$(PROCESADAS=$TOTAL_TABLAS barra_progreso 100)"
     }
 
-  echo "Backup creado: $OUTFILE"
+  echo -e "${GREEN}✔ Backup creado: $OUTFILE${RESET}"
+  notificar_discord "Backup \\\"$PGDATABASE\\\" realizado $(date '+%Y-%m-%d %H:%M:%S')"
 else
   read -rp "Directorio con backups [.]: " BACKUP_DIR
   BACKUP_DIR="${BACKUP_DIR:-.}"
@@ -244,7 +302,8 @@ else
     --verbose \
     "$DUMPFILE"
 
-  echo "Restauración completada."
+  echo -e "${GREEN}✔ Restauración completada.${RESET}"
+  notificar_discord "Restauración \\\"$PGDATABASE\\\" realizada $(date '+%Y-%m-%d %H:%M:%S')"
 fi
 
 exit 0
