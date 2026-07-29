@@ -174,17 +174,100 @@ if [[ ${#ENCONTRADAS_DB[@]} -eq 0 ]]; then
   exit 0
 fi
 
+SCRIPT_PROGRAMADO="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/bd_backup_programado_individual.sh"
+
 echo
-OPCIONES_BACKUP=("Backup ahora" "Programarlo (repetir automáticamente)" "No, gracias")
-OPCION_BACKUP=$(elegir_opcion "¿Querés sacar backup de alguna de estas bases? (↑/↓ y Enter):" "" "${OPCIONES_BACKUP[@]}")
+OPCIONES_BACKUP=("Backup ahora" "Restaurar un backup ahora" "Programar backup" "Programar restauración" "No, gracias")
+OPCION_BACKUP=$(elegir_opcion "¿Qué querés hacer con estas bases? (↑/↓ y Enter):" "" "${OPCIONES_BACKUP[@]}")
 echo
 
-if [[ "$OPCION_BACKUP" -eq 2 ]]; then
-  exit 0
-fi
+case "$OPCION_BACKUP" in
+  4) exit 0 ;;
+  2) exec "$SCRIPT_PROGRAMADO" --accion backup ;;
+  3) exec "$SCRIPT_PROGRAMADO" --accion restore ;;
+esac
 
 if [[ "$OPCION_BACKUP" -eq 1 ]]; then
-  exec "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/bd_backup_programado_individual.sh"
+  read -rp "Directorio con backups [.]: " BACKUP_DIR
+  BACKUP_DIR="${BACKUP_DIR:-.}"
+
+  mapfile -t DUMPS < <(find "$BACKUP_DIR" -maxdepth 1 -type f -name '*.dump' | sort)
+
+  if [[ ${#DUMPS[@]} -eq 0 ]]; then
+    echo "No se encontraron archivos .dump en '$BACKUP_DIR'." >&2
+    exit 1
+  fi
+
+  DUMPLINEAS=()
+  for f in "${DUMPS[@]}"; do
+    DUMPLINEAS+=("$(basename "$f")")
+  done
+
+  DUMPOPCION=$(elegir_opcion "Seleccioná el backup a restaurar (↑/↓ y Enter):" "" "${DUMPLINEAS[@]}")
+  echo
+
+  DUMPFILE="${DUMPS[$DUMPOPCION]}"
+  SUGERIDA=$(basename "$DUMPFILE" | sed -E 's/-[0-9]{14}\.dump$//')
+
+  LINEAS=()
+  for i in "${!ENCONTRADAS_DB[@]}"; do
+    LINEAS+=("$(printf '%-14s %-18s %s' "${ENCONTRADAS_SERVIDOR[$i]}" "${ENCONTRADAS_HOST[$i]}:${ENCONTRADAS_PUERTO[$i]}" "${ENCONTRADAS_DB[$i]}")")
+  done
+  LINEAS+=("$(printf '%-14s %-18s %s' "otra" "-" "escribir el nombre a mano")")
+  IDX_OTRA=${#ENCONTRADAS_DB[@]}
+
+  ENCABEZADO=$(printf '%-14s %-18s %s' "server" "host:puerto" "base de datos")
+  OPCION=$(elegir_opcion "Seleccioná el servidor/base destino (↑/↓ y Enter):" "$ENCABEZADO" "${LINEAS[@]}")
+  echo
+
+  if [[ "$OPCION" -eq "$IDX_OTRA" ]]; then
+    read -rp "Host destino: " PGHOST
+    read -rp "Puerto destino [5432]: " PGPORT
+    PGPORT="${PGPORT:-5432}"
+  else
+    PGHOST="${ENCONTRADAS_HOST[$OPCION]}"
+    PGPORT="${ENCONTRADAS_PUERTO[$OPCION]}"
+  fi
+
+  read -rp "Base de datos destino [$SUGERIDA]: " PGDATABASE
+  PGDATABASE="${PGDATABASE:-$SUGERIDA}"
+
+  EXISTE="no"
+  for db in "${ENCONTRADAS_DB[@]}"; do
+    [[ "$db" == "$PGDATABASE" ]] && EXISTE="si"
+  done
+
+  if [[ "$EXISTE" == "no" ]]; then
+    read -rp "La base '$PGDATABASE' no existe. ¿Crearla? (s/n): " CREAR
+    if [[ "$CREAR" == "s" || "$CREAR" == "S" ]]; then
+      createdb \
+        --host="$PGHOST" \
+        --port="$PGPORT" \
+        --username="$PGUSER" \
+        "$PGDATABASE"
+    else
+      echo "Cancelado." >&2
+      exit 1
+    fi
+  fi
+
+  echo
+  echo "Restaurando '$DUMPFILE' en '$PGDATABASE' ($PGHOST:$PGPORT)..."
+
+  pg_restore \
+    --host="$PGHOST" \
+    --port="$PGPORT" \
+    --username="$PGUSER" \
+    --dbname="$PGDATABASE" \
+    --clean \
+    --if-exists \
+    --no-owner \
+    --verbose \
+    "$DUMPFILE"
+
+  echo -e "${GREEN}✔ Restauración completada.${RESET}"
+
+  exit 0
 fi
 
 LINEAS=()
@@ -201,26 +284,16 @@ PGHOST="${ENCONTRADAS_HOST[$OPCION]}"
 PGPORT="${ENCONTRADAS_PUERTO[$OPCION]}"
 PGDATABASE="${ENCONTRADAS_DB[$OPCION]}"
 
+echo
+OPCIONES_FILAS=("Primeras 10 filas por tabla" "Primeras 100 filas por tabla" "Toda la data (backup completo)")
+OPCION_FILAS=$(elegir_opcion "¿Cuántas filas por tabla querés guardar? (↑/↓ y Enter):" "" "${OPCIONES_FILAS[@]}")
+echo
+
 read -rp "Directorio destino [.]: " TARGET
 TARGET="${TARGET:-.}"
 mkdir -p "$TARGET"
 
 TS=$(date +%Y%m%d%H%M%S)
-OUTFILE="$TARGET/${PGDATABASE}-${TS}.dump"
-
-echo
-echo "Generando backup de '$PGDATABASE' ($PGHOST:$PGPORT)..."
-echo
-
-TOTAL_TABLAS=$(psql \
-  --host="$PGHOST" \
-  --port="$PGPORT" \
-  --username="$PGUSER" \
-  --dbname="$PGDATABASE" \
-  --tuples-only \
-  --no-align \
-  --pset=pager=off \
-  --command="SELECT count(*) FROM pg_catalog.pg_tables WHERE schemaname NOT IN ('pg_catalog','information_schema');")
 
 ANCHO=30
 
@@ -234,31 +307,118 @@ barra_progreso() {
   printf '] %3d%% (%d/%d tablas)' "$porc" "$PROCESADAS" "$TOTAL_TABLAS"
 }
 
-pg_dump \
-  --host="$PGHOST" \
-  --port="$PGPORT" \
-  --username="$PGUSER" \
-  --format=custom \
-  --file="$OUTFILE" \
-  --verbose \
-  "$PGDATABASE" 2>&1 >/dev/null | {
-    PROCESADAS=0
-    printf '\r%s' "$(barra_progreso 0)"
-    while IFS= read -r LINEA; do
-      if [[ "$LINEA" == *"dumping contents of table"* ]]; then
-        PROCESADAS=$((PROCESADAS + 1))
-        if [[ "$TOTAL_TABLAS" -gt 0 ]]; then
-          PORC=$((PROCESADAS * 100 / TOTAL_TABLAS))
-        else
-          PORC=100
-        fi
-        [[ $PORC -gt 100 ]] && PORC=100
-        printf '\r%s' "$(barra_progreso "$PORC")"
-      fi
-    done
-    printf '\r%s\n' "$(PROCESADAS=$TOTAL_TABLAS barra_progreso 100)"
-  }
+if [[ "$OPCION_FILAS" -eq 2 ]]; then
+  OUTFILE="$TARGET/${PGDATABASE}-${TS}.dump"
 
-echo -e "${GREEN}✔ Backup creado: $OUTFILE${RESET}"
+  echo
+  echo "Generando backup completo de '$PGDATABASE' ($PGHOST:$PGPORT)..."
+  echo
+
+  TOTAL_TABLAS=$(psql \
+    --host="$PGHOST" \
+    --port="$PGPORT" \
+    --username="$PGUSER" \
+    --dbname="$PGDATABASE" \
+    --tuples-only \
+    --no-align \
+    --pset=pager=off \
+    --command="SELECT count(*) FROM pg_catalog.pg_tables WHERE schemaname NOT IN ('pg_catalog','information_schema');")
+
+  pg_dump \
+    --host="$PGHOST" \
+    --port="$PGPORT" \
+    --username="$PGUSER" \
+    --format=custom \
+    --file="$OUTFILE" \
+    --verbose \
+    "$PGDATABASE" 2>&1 >/dev/null | {
+      PROCESADAS=0
+      printf '\r%s' "$(barra_progreso 0)"
+      while IFS= read -r LINEA; do
+        if [[ "$LINEA" == *"dumping contents of table"* ]]; then
+          PROCESADAS=$((PROCESADAS + 1))
+          if [[ "$TOTAL_TABLAS" -gt 0 ]]; then
+            PORC=$((PROCESADAS * 100 / TOTAL_TABLAS))
+          else
+            PORC=100
+          fi
+          [[ $PORC -gt 100 ]] && PORC=100
+          printf '\r%s' "$(barra_progreso "$PORC")"
+        fi
+      done
+      printf '\r%s\n' "$(PROCESADAS=$TOTAL_TABLAS barra_progreso 100)"
+    }
+
+  echo -e "${GREEN}✔ Backup creado: $OUTFILE${RESET}"
+else
+  if [[ "$OPCION_FILAS" -eq 0 ]]; then
+    LIMITE=10
+  else
+    LIMITE=100
+  fi
+
+  OUTFILE="$TARGET/${PGDATABASE}-${TS}-primeras${LIMITE}filas.sql"
+
+  echo
+  echo "Generando backup de '$PGDATABASE' ($PGHOST:$PGPORT) con las primeras $LIMITE filas por tabla..."
+  echo
+
+  # Solo el esquema (estructura); los datos se agregan tabla por tabla abajo.
+  pg_dump \
+    --host="$PGHOST" \
+    --port="$PGPORT" \
+    --username="$PGUSER" \
+    --schema-only \
+    --no-owner \
+    --file="$OUTFILE" \
+    "$PGDATABASE"
+
+  mapfile -t TABLAS < <(psql \
+    --host="$PGHOST" \
+    --port="$PGPORT" \
+    --username="$PGUSER" \
+    --dbname="$PGDATABASE" \
+    --tuples-only \
+    --no-align \
+    --pset=pager=off \
+    --command="SELECT quote_ident(schemaname) || '.' || quote_ident(tablename) FROM pg_catalog.pg_tables WHERE schemaname NOT IN ('pg_catalog','information_schema') ORDER BY 1;")
+
+  TOTAL_TABLAS=${#TABLAS[@]}
+  PROCESADAS=0
+  printf '\r%s' "$(barra_progreso 0)"
+
+  for tabla in "${TABLAS[@]}"; do
+    tabla="${tabla%$'\r'}"
+    [[ -z "$tabla" ]] && continue
+
+    {
+      echo
+      echo "COPY $tabla FROM stdin;"
+    } >> "$OUTFILE"
+
+    psql \
+      --host="$PGHOST" \
+      --port="$PGPORT" \
+      --username="$PGUSER" \
+      --dbname="$PGDATABASE" \
+      --tuples-only \
+      --no-align \
+      --pset=pager=off \
+      --command="\\copy (SELECT * FROM $tabla LIMIT $LIMITE) TO STDOUT" | sed $'s/\r$//' >> "$OUTFILE"
+
+    echo '\.' >> "$OUTFILE"
+
+    PROCESADAS=$((PROCESADAS + 1))
+    if [[ "$TOTAL_TABLAS" -gt 0 ]]; then
+      PORC=$((PROCESADAS * 100 / TOTAL_TABLAS))
+    else
+      PORC=100
+    fi
+    printf '\r%s' "$(barra_progreso "$PORC")"
+  done
+  printf '\r%s\n' "$(barra_progreso 100)"
+
+  echo -e "${GREEN}✔ Backup creado: $OUTFILE${RESET} (solo primeras $LIMITE filas por tabla; restaurar con psql -f, no con pg_restore)"
+fi
 
 exit 0
