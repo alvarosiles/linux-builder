@@ -89,13 +89,23 @@ else
     REMOTE_HOST="${HOSTS_CONOCIDOS[$OPCION]}"
 fi
 
-read -rp "Usuario remoto [${REMOTE_USER_DEFAULT}]: " REMOTE_USER
+read -rp "Usuario remoto [${REMOTE_USER_DEFAULT}] (s = servisofts): " REMOTE_USER
 REMOTE_USER=${REMOTE_USER:-$REMOTE_USER_DEFAULT}
+[[ "$REMOTE_USER" == "s" ]] && REMOTE_USER="servisofts"
 
 # Alias sugerido a partir de los dos últimos octetos, ej. 192.168.2.5 -> 2.5
 ALIAS_SUGERIDO=$(echo "$REMOTE_HOST" | awk -F. '{print $3"."$4}')
-read -rp "Alias para conectarse con 'ssh <alias>' [${ALIAS_SUGERIDO}]: " ALIAS
-ALIAS=${ALIAS:-$ALIAS_SUGERIDO}
+read -rp "Alias para conectarse con 'ssh <alias>' [${ALIAS_SUGERIDO}]: " ALIAS_INPUT
+
+# Si se escribe un alias propio (distinto del sugerido), se registran
+# ambos en la misma línea "Host" para poder conectarse indistintamente
+# con cualquiera de los dos, ej. 'ssh ss' o 'ssh 2.1'.
+if [[ -z "$ALIAS_INPUT" || "$ALIAS_INPUT" == "$ALIAS_SUGERIDO" ]]; then
+    ALIASES="$ALIAS_SUGERIDO"
+else
+    ALIASES="$ALIAS_INPUT $ALIAS_SUGERIDO"
+fi
+ALIAS_PRINCIPAL="${ALIASES%% *}"
 
 # 1. Generar par de llaves SSH si no existe ninguna
 if ! ls ~/.ssh/id_*.pub >/dev/null 2>&1; then
@@ -107,18 +117,31 @@ fi
 echo "Copiando llave pública a ${REMOTE_USER}@${REMOTE_HOST}..."
 ssh-copy-id "${REMOTE_USER}@${REMOTE_HOST}"
 
-# 3. Quitar un bloque anterior con el mismo alias (si existe) y agregar el nuevo
-if grep -q "^Host ${ALIAS}$" "$CONFIG_FILE" 2>/dev/null; then
-    sed -i "/^Host ${ALIAS}$/,/^$/d" "$CONFIG_FILE"
-fi
+# 3. Quitar cualquier bloque anterior que use alguno de estos alias y
+# agregar el nuevo (con los dos alias en la misma línea "Host").
+for a in $ALIASES; do
+    if grep -qE "^Host ([^ ]+ )*${a}( |$)" "$CONFIG_FILE" 2>/dev/null; then
+        awk -v alias="$a" '
+            /^Host / {
+                skip = 0
+                n = split($0, hosts)
+                for (i = 2; i <= n; i++) if (hosts[i] == alias) skip = 1
+                if (skip) next
+            }
+            skip && /^$/ { skip = 0; next }
+            skip { next }
+            { print }
+        ' "$CONFIG_FILE" > "$CONFIG_FILE.tmp" && mv "$CONFIG_FILE.tmp" "$CONFIG_FILE"
+    fi
+done
 
 {
     echo ""
-    echo "Host ${ALIAS}"
+    echo "Host ${ALIASES}"
     echo "    HostName ${REMOTE_HOST}"
     echo "    User ${REMOTE_USER}"
 } >> "$CONFIG_FILE"
 
 echo ""
-echo -e "${GREEN}✔ Listo, ya se creó el alias '${ALIAS}'.${RESET}"
-echo "Ahora puede conectarse simplemente escribiendo: ssh ${ALIAS}"
+echo -e "${GREEN}✔ Listo, ya se creó el alias '${ALIASES// / y }'.${RESET}"
+echo "Ahora puede conectarse escribiendo: ssh ${ALIAS_PRINCIPAL}"
