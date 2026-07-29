@@ -62,6 +62,17 @@ if [[ "${1:-}" == "--run-job" ]]; then
   export PGPASSWORD
 fi
 
+# --accion backup|restore: preselecciona qué hacer y se salta esa
+# pregunta (usado por bd_verificar_conexion.sh para ir directo).
+ACCION_PRESELECCIONADA=""
+if [[ "${1:-}" == "--accion" ]]; then
+  case "${2:-}" in
+    backup) ACCION_PRESELECCIONADA=0 ;;
+    restore) ACCION_PRESELECCIONADA=1 ;;
+    *) echo "--accion debe ser 'backup' o 'restore'." >&2; exit 1 ;;
+  esac
+fi
+
 YELLOW='\033[1;33m'
 GREEN='\033[1;32m'
 RESET='\033[0m'
@@ -162,9 +173,13 @@ if [[ -z "$RUN_JOB_ID" ]]; then
     --pset=pager=off \
     --command="SELECT datname FROM pg_database ORDER BY datname;")
 
-  ACCIONES=("Hacer backup" "Restaurar un backup")
-  ACCION=$(elegir_opcion "¿Qué querés hacer? (↑/↓ y Enter):" "" "${ACCIONES[@]}")
-  echo
+  if [[ -n "$ACCION_PRESELECCIONADA" ]]; then
+    ACCION="$ACCION_PRESELECCIONADA"
+  else
+    ACCIONES=("Hacer backup" "Restaurar un backup")
+    ACCION=$(elegir_opcion "¿Qué querés hacer? (↑/↓ y Enter):" "" "${ACCIONES[@]}")
+    echo
+  fi
 fi
 
 hacer_backup() {
