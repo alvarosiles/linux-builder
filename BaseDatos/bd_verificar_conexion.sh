@@ -152,6 +152,7 @@ for entrada in "${BASES[@]}"; do
       --pset=pager=off \
       --command="SELECT datname FROM pg_database WHERE datistemplate = false ORDER BY datname;" 2>/dev/null)"
     while IFS= read -r nombre_bd; do
+      nombre_bd="${nombre_bd%$'\r'}"
       if [[ -n "$nombre_bd" ]]; then
         echo "               - $nombre_bd"
         ENCONTRADAS_SERVIDOR+=("$nombre")
@@ -168,5 +169,96 @@ done
 
 echo
 echo -e "${GREEN}✔ Verificación completa: $EXITOSOS ok, $FALLIDOS con error.${RESET}"
+
+if [[ ${#ENCONTRADAS_DB[@]} -eq 0 ]]; then
+  exit 0
+fi
+
+echo
+OPCIONES_BACKUP=("Backup ahora" "Programarlo (repetir automáticamente)" "No, gracias")
+OPCION_BACKUP=$(elegir_opcion "¿Querés sacar backup de alguna de estas bases? (↑/↓ y Enter):" "" "${OPCIONES_BACKUP[@]}")
+echo
+
+if [[ "$OPCION_BACKUP" -eq 2 ]]; then
+  exit 0
+fi
+
+if [[ "$OPCION_BACKUP" -eq 1 ]]; then
+  exec "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/bd_backup_programado_individual.sh"
+fi
+
+LINEAS=()
+for i in "${!ENCONTRADAS_DB[@]}"; do
+  LINEAS+=("$(printf '%-14s %-18s %s' "${ENCONTRADAS_SERVIDOR[$i]}" "${ENCONTRADAS_HOST[$i]}:${ENCONTRADAS_PUERTO[$i]}" "${ENCONTRADAS_DB[$i]}")")
+done
+
+echo
+ENCABEZADO=$(printf '%-14s %-18s %s' "server" "host:puerto" "base de datos")
+OPCION=$(elegir_opcion "Seleccioná la base de datos para backup (↑/↓ y Enter):" "$ENCABEZADO" "${LINEAS[@]}")
+echo
+
+PGHOST="${ENCONTRADAS_HOST[$OPCION]}"
+PGPORT="${ENCONTRADAS_PUERTO[$OPCION]}"
+PGDATABASE="${ENCONTRADAS_DB[$OPCION]}"
+
+read -rp "Directorio destino [.]: " TARGET
+TARGET="${TARGET:-.}"
+mkdir -p "$TARGET"
+
+TS=$(date +%Y%m%d%H%M%S)
+OUTFILE="$TARGET/${PGDATABASE}-${TS}.dump"
+
+echo
+echo "Generando backup de '$PGDATABASE' ($PGHOST:$PGPORT)..."
+echo
+
+TOTAL_TABLAS=$(psql \
+  --host="$PGHOST" \
+  --port="$PGPORT" \
+  --username="$PGUSER" \
+  --dbname="$PGDATABASE" \
+  --tuples-only \
+  --no-align \
+  --pset=pager=off \
+  --command="SELECT count(*) FROM pg_catalog.pg_tables WHERE schemaname NOT IN ('pg_catalog','information_schema');")
+
+ANCHO=30
+
+barra_progreso() {
+  local porc=$1
+  local llenas=$(( porc * ANCHO / 100 ))
+  local vacias=$(( ANCHO - llenas ))
+  printf '['
+  [[ $llenas -gt 0 ]] && printf '%0.s#' $(seq 1 "$llenas")
+  [[ $vacias -gt 0 ]] && printf '%0.s.' $(seq 1 "$vacias")
+  printf '] %3d%% (%d/%d tablas)' "$porc" "$PROCESADAS" "$TOTAL_TABLAS"
+}
+
+pg_dump \
+  --host="$PGHOST" \
+  --port="$PGPORT" \
+  --username="$PGUSER" \
+  --format=custom \
+  --file="$OUTFILE" \
+  --verbose \
+  "$PGDATABASE" 2>&1 >/dev/null | {
+    PROCESADAS=0
+    printf '\r%s' "$(barra_progreso 0)"
+    while IFS= read -r LINEA; do
+      if [[ "$LINEA" == *"dumping contents of table"* ]]; then
+        PROCESADAS=$((PROCESADAS + 1))
+        if [[ "$TOTAL_TABLAS" -gt 0 ]]; then
+          PORC=$((PROCESADAS * 100 / TOTAL_TABLAS))
+        else
+          PORC=100
+        fi
+        [[ $PORC -gt 100 ]] && PORC=100
+        printf '\r%s' "$(barra_progreso "$PORC")"
+      fi
+    done
+    printf '\r%s\n' "$(PROCESADAS=$TOTAL_TABLAS barra_progreso 100)"
+  }
+
+echo -e "${GREEN}✔ Backup creado: $OUTFILE${RESET}"
 
 exit 0

@@ -1,4 +1,4 @@
 backup-*/
-*.dump
+# *.dump
 # credenciales.sh
 BaseDatos/.automatico_estado/
