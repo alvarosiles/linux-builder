@@ -1,6 +1,7 @@
 #!/bin/bash
 # Configura acceso SSH sin contraseña a un servidor y crea un alias
-# para poder conectarse simplemente con: ssh <alias>
+# para poder conectarse simplemente con: ss <alias>
+# (requiere el alias de shell 'ss'=ssh definido en ~/.bash_aliases)
 
 set -e
 
@@ -95,7 +96,7 @@ REMOTE_USER=${REMOTE_USER:-$REMOTE_USER_DEFAULT}
 
 # Alias sugerido a partir de los dos últimos octetos, ej. 192.168.2.5 -> 2.5
 ALIAS_SUGERIDO=$(echo "$REMOTE_HOST" | awk -F. '{print $3"."$4}')
-read -rp "Alias para conectarse con 'ssh <alias>' [${ALIAS_SUGERIDO}]: " ALIAS_INPUT
+read -rp "Alias para conectarse con 'ss <alias>' [${ALIAS_SUGERIDO}]: " ALIAS_INPUT
 
 # Si se escribe un alias propio (distinto del sugerido), se registran
 # ambos en la misma línea "Host" para poder conectarse indistintamente
@@ -144,4 +145,4 @@ done
 
 echo ""
 echo -e "${GREEN}✔ Listo, ya se creó el alias '${ALIASES// / y }'.${RESET}"
-echo "Ahora puede conectarse escribiendo: ssh ${ALIAS_PRINCIPAL}"
+echo "Ahora puede conectarse escribiendo: ss ${ALIAS_PRINCIPAL}"

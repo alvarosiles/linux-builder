@@ -36,7 +36,7 @@ ALIAS="" DESTINO="" USUARIO="" PUERTO="" TOTAL=0
 
 imprimir_bloque() {
     [[ -z "$ALIAS" ]] && return
-    printf " %-22s %-18s %-14s %6s\n" "ssh $ALIAS" "${DESTINO:--}" "${USUARIO:--}" "${PUERTO:-22}"
+    printf " %-22s %-18s %-14s %6s\n" "ss $ALIAS" "${DESTINO:--}" "${USUARIO:--}" "${PUERTO:-22}"
     TOTAL=$((TOTAL + 1))
 }
 
